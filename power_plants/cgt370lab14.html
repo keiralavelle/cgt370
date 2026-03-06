@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Global Power Plant Dashboard</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+        background: #f7f7f7;
+    }
+
+    h1 {
+        text-align: center;
+    }
+
+    .controls {
+        text-align: center;
+        margin-bottom: 20px;
+    }
+
+    .dashboard {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+    }
+
+    .chart-box {
+        background: white;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .full-width {
+        grid-column: 1 / span 2;
+    }
+
+    h2 {
+        font-size: 18px;
+        margin-bottom: 10px;
+    }
+
+    .insight {
+        background: white;
+        margin-top: 20px;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        font-size: 16px;
+    }
+</style>
+</head>
+<body>
+
+<h1>Global Power Plant Capacity Dashboard</h1>
+
+<div class="controls">
+    <label for="binSlider"><strong>Histogram Bin Count:</strong></label>
+    <input type="range" id="binSlider" min="5" max="30" value="10">
+    <span id="binValue">10</span>
+</div>
+
+<div class="dashboard">
+    <div class="chart-box">
+        <h2>Histogram — Distribution of Plant Capacity</h2>
+        <svg id="histogram" width="500" height="350"></svg>
+    </div>
+
+    <div class="chart-box">
+        <h2>Box Plot — Capacity by Energy Type</h2>
+        <svg id="boxplot" width="500" height="350"></svg>
+    </div>
+
+    <div class="chart-box full-width">
+        <h2>Composition Chart — Energy Type Composition</h2>
+        <svg id="piechart" width="600" height="400"></svg>
+    </div>
+</div>
+
+<div class="insight">
+    <strong>Insight:</strong> Nuclear plants tend to have higher capacities than most other energy types.
+</div>
+
+<script>
+d3.csv("power_plants.csv").then(data => {
+
+    data.forEach(d => {
+        d.capacity_mw = +d.capacity_mw;
+    });
+
+    drawHistogram(data, 10);
+    drawBoxPlot(data);
+    drawPieChart(data);
+
+    d3.select("#binSlider").on("input", function() {
+        const binCount = +this.value;
+        d3.select("#binValue").text(binCount);
+        drawHistogram(data, binCount);
+    });
+
+    function drawHistogram(data, binCount) {
+        const svg = d3.select("#histogram");
+        svg.selectAll("*").remove();
+
+        const width = +svg.attr("width");
+        const height = +svg.attr("height");
+        const margin = {top: 20, right: 20, bottom: 40, left: 50};
+        const innerWidth = width - margin.left - margin.right;
+        const innerHeight = height - margin.top - margin.bottom;
+
+        const chart = svg.append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        const values = data.map(d => d.capacity_mw);
+
+        const x = d3.scaleLinear()
+            .domain(d3.extent(values))
+            .nice()
+            .range([0, innerWidth]);
+
+        const bins = d3.bin()
+            .domain(x.domain())
+            .thresholds(binCount)(values);
+
+        const y = d3.scaleLinear()
+            .domain([0, d3.max(bins, d => d.length)])
+            .nice()
+            .range([innerHeight, 0]);
+
+        chart.selectAll("rect")
+            .data(bins)
+            .enter()
+            .append("rect")
+            .attr("x", d => x(d.x0) + 1)
+            .attr("y", d => y(d.length))
+            .attr("width", d => Math.max(0, x(d.x1) - x(d.x0) - 1))
+            .attr("height", d => innerHeight - y(d.length))
+            .attr("fill", "steelblue");
+
+        chart.append("g")
+            .attr("transform", `translate(0,${innerHeight})`)
+            .call(d3.axisBottom(x));
+
+        chart.append("g")
+            .call(d3.axisLeft(y));
+    }
+
+    function drawBoxPlot(data) {
+        const svg = d3.select("#boxplot");
+        svg.selectAll("*").remove();
+
+        const width = +svg.attr("width");
+        const height = +svg.attr("height");
+        const margin = {top: 20, right: 20, bottom: 50, left: 50};
+        const innerWidth = width - margin.left - margin.right;
+        const innerHeight = height - margin.top - margin.bottom;
+
+        const chart = svg.append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        const grouped = d3.group(data, d => d.energy_type);
+        const types = Array.from(grouped.keys());
+
+        const x = d3.scaleBand()
+            .domain(types)
+            .range([0, innerWidth])
+            .padding(0.3);
+
+        const y = d3.scaleLinear()
+            .domain([0, d3.max(data, d => d.capacity_mw)])
+            .nice()
+            .range([innerHeight, 0]);
+
+        chart.append("g")
+            .attr("transform", `translate(0,${innerHeight})`)
+            .call(d3.axisBottom(x));
+
+        chart.append("g")
+            .call(d3.axisLeft(y));
+
+        grouped.forEach((values, key) => {
+            const capacities = values.map(d => d.capacity_mw).sort(d3.ascending);
+
+            const q1 = d3.quantileSorted(capacities, 0.25);
+            const median = d3.quantileSorted(capacities, 0.5);
+            const q3 = d3.quantileSorted(capacities, 0.75);
+            const min = capacities[0];
+            const max = capacities[capacities.length - 1];
+
+            const center = x(key) + x.bandwidth() / 2;
+            const boxWidth = x.bandwidth() * 0.5;
+
+            chart.append("line")
+                .attr("x1", center)
+                .attr("x2", center)
+                .attr("y1", y(min))
+                .attr("y2", y(max))
+                .attr("stroke", "black");
+
+            chart.append("rect")
+                .attr("x", center - boxWidth / 2)
+                .attr("width", boxWidth)
+                .attr("y", y(q3))
+                .attr("height", y(q1) - y(q3))
+                .attr("fill", "orange")
+                .attr("stroke", "black");
+
+            chart.append("line")
+                .attr("x1", center - boxWidth / 2)
+                .attr("x2", center + boxWidth / 2)
+                .attr("y1", y(median))
+                .attr("y2", y(median))
+                .attr("stroke", "black");
+
+            chart.append("line")
+                .attr("x1", center - boxWidth / 4)
+                .attr("x2", center + boxWidth / 4)
+                .attr("y1", y(min))
+                .attr("y2", y(min))
+                .attr("stroke", "black");
+
+            chart.append("line")
+                .attr("x1", center - boxWidth / 4)
+                .attr("x2", center + boxWidth / 4)
+                .attr("y1", y(max))
+                .attr("y2", y(max))
+                .attr("stroke", "black");
+        });
+    }
+
+    function drawPieChart(data) {
+        const svg = d3.select("#piechart");
+        svg.selectAll("*").remove();
+
+        const width = +svg.attr("width");
+        const height = +svg.attr("height");
+        const radius = Math.min(width, height) / 2 - 30;
+
+        const chart = svg.append("g")
+            .attr("transform", `translate(${width/2},${height/2})`);
+
+        const summary = d3.rollups(
+            data,
+            v => d3.sum(v, d => d.capacity_mw),
+            d => d.energy_type
+        ).map(([energy_type, total]) => ({ energy_type, total }));
+
+        const pie = d3.pie()
+            .value(d => d.total);
+
+        const arcs = pie(summary);
+
+        const arc = d3.arc()
+            .innerRadius(0)
+            .outerRadius(radius);
+
+        const color = d3.scaleOrdinal()
+            .domain(summary.map(d => d.energy_type))
+            .range(d3.schemeCategory10);
+
+        chart.selectAll("path")
+            .data(arcs)
+            .enter()
+            .append("path")
+            .attr("d", arc)
+            .attr("fill", d => color(d.data.energy_type))
+            .attr("stroke", "white")
+            .attr("stroke-width", 2);
+
+        chart.selectAll("text")
+            .data(arcs)
+            .enter()
+            .append("text")
+            .attr("transform", d => `translate(${arc.centroid(d)})`)
+            .attr("text-anchor", "middle")
+            .style("font-size", "12px")
+            .text(d => d.data.energy_type);
+    }
+
+});
+</script>
+
+</body>
+</html>
