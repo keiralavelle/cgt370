@@ -1,0 +1,400 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN">
+<html lang="en">
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lab 13 - Enhanced Aid Flow Map</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=us-ascii" />
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #f4f7fb;
+        color: #1f2937;
+      }
+
+      .page-title {
+        text-align: center;
+        margin: 16px 0 4px;
+        font-size: 28px;
+        font-weight: 700;
+        color: #0f172a;
+      }
+
+      .page-subtitle {
+        text-align: center;
+        margin: 0 0 10px;
+        font-size: 14px;
+        color: #475569;
+      }
+
+      svg {
+        display: block;
+        margin: 0 auto 20px;
+        border: 1px solid #cbd5e1;
+        background: linear-gradient(to bottom, #eaf4ff, #f8fbff);
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.08);
+        border-radius: 10px;
+      }
+
+      .country {
+        fill: #dde7f0;
+        stroke: #8fa3b8;
+        stroke-width: 0.7;
+      }
+
+      .legend text,
+      .chart-title {
+        fill: #1e293b;
+      }
+
+      #tooltip {
+        visibility: hidden;
+        position: absolute;
+        background: rgba(15, 23, 42, 0.95);
+        color: white;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font: 12px/1.4 Arial, sans-serif;
+        pointer-events: none;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+      }
+
+      #tooltip .donor-name {
+        font-size: 13px;
+        font-weight: bold;
+        margin-bottom: 4px;
+      }
+
+      .donor-circle {
+        fill: #2563eb;
+        fill-opacity: 0.72;
+        stroke: #0f172a;
+        stroke-width: 1;
+        transition: r 0.15s ease, fill-opacity 0.15s ease, stroke-width 0.15s ease;
+      }
+
+      .recipient-dot {
+        fill: #111827;
+        opacity: 0.72;
+      }
+
+      .flow-line {
+        fill: none;
+        stroke: #2563eb;
+        stroke-opacity: 0.28;
+        stroke-width: 1.4;
+        stroke-linecap: round;
+      }
+    </style>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+  </head>
+  <body>
+    <div class="page-title">Global Aid Donation Flows</div>
+    <div class="page-subtitle">
+      Donor countries sized by total donation amount, with flows to recipient countries
+    </div>
+
+    <script>
+      const fetchData = async () => {
+        try {
+          const geoData = await d3.json(
+            "https://raw.githubusercontent.com/datasets/geo-boundaries-world-110m/master/countries.geojson"
+          );
+          const data = await d3.csv("aiddata.csv");
+          drawDotmap(geoData, data);
+        } catch (error) {
+          console.error("Error fetching data:", error);
+        }
+      };
+
+      function drawDotmap(geoData, data) {
+        data.forEach((d) => {
+          d.commitment_amount_usd_constant = +d.commitment_amount_usd_constant;
+          d.donor_lon = +d.donor_lon;
+          d.donor_lat = +d.donor_lat;
+          d.recipient_lon = +d.recipient_lon;
+          d.recipient_lat = +d.recipient_lat;
+        });
+
+        const rollupData = d3.rollup(
+          data,
+          (v) => ({
+            amount: d3.sum(v, (d) => d.commitment_amount_usd_constant),
+            donor_lon: v[0].donor_lon,
+            donor_lat: v[0].donor_lat,
+            recipients: v
+              .filter(
+                (d) =>
+                  !isNaN(d.recipient_lon) &&
+                  !isNaN(d.recipient_lat)
+              )
+              .map((d) => ({
+                country: d.recipient,
+                lat: d.recipient_lat,
+                lon: d.recipient_lon,
+              })),
+          }),
+          (d) => d.donor
+        );
+
+        const rollupArray = Array.from(rollupData, ([key, value]) => ({
+          donor: key,
+          amount: value.amount,
+          donor_lat: value.donor_lat,
+          donor_lon: value.donor_lon,
+          recipients: value.recipients,
+        })).filter(
+          (d) =>
+            !isNaN(d.donor_lon) &&
+            !isNaN(d.donor_lat)
+        );
+
+        const width = 980;
+        const height = 620;
+
+        const svg = d3
+          .select("body")
+          .append("svg")
+          .attr("width", width)
+          .attr("height", height);
+
+        const defs = svg.append("defs");
+
+        defs
+          .append("filter")
+          .attr("id", "glow")
+          .html(`
+            <feGaussianBlur stdDeviation="2.5" result="coloredBlur"></feGaussianBlur>
+            <feMerge>
+              <feMergeNode in="coloredBlur"></feMergeNode>
+              <feMergeNode in="SourceGraphic"></feMergeNode>
+            </feMerge>
+          `);
+
+        const g = svg.append("g");
+
+        const filteredFeatures = geoData.features.filter(
+          (d) => d.properties.name !== "Antarctica"
+        );
+
+        const projection = d3
+          .geoMercator()
+          .fitSize(
+            [width, height - 40],
+            {
+              type: "FeatureCollection",
+              features: filteredFeatures,
+            }
+          );
+
+        const path = d3.geoPath().projection(projection);
+
+        const radiusScale = d3
+          .scaleSqrt()
+          .domain(d3.extent(rollupArray, (d) => d.amount))
+          .range([4, 22]);
+
+        const tooltip = d3
+          .select("body")
+          .append("div")
+          .attr("id", "tooltip");
+
+        // Ocean label / chart label
+        svg
+          .append("text")
+          .attr("class", "chart-title")
+          .attr("x", 20)
+          .attr("y", 28)
+          .attr("font-size", 18)
+          .attr("font-weight", 700)
+          .text("International Aid Network");
+
+        // World map
+        g.selectAll(".country")
+          .data(filteredFeatures)
+          .join("path")
+          .attr("class", "country")
+          .attr("d", path);
+
+        const lineLayer = g.append("g").attr("class", "flow-lines");
+        const donorLayer = g.append("g").attr("class", "donors");
+        const recipientLayer = g.append("g").attr("class", "recipients");
+
+        function flowPath(donor, recipient) {
+          const source = projection([donor.donor_lon, donor.donor_lat]);
+          const target = projection([recipient.lon, recipient.lat]);
+
+          const midX = (source[0] + target[0]) / 2;
+          const midY = (source[1] + target[1]) / 2 - 35;
+
+          return `M ${source[0]},${source[1]} Q ${midX},${midY} ${target[0]},${target[1]}`;
+        }
+
+        function animateFlows(selection) {
+          selection.each(function () {
+            const totalLength = this.getTotalLength();
+            d3.select(this)
+              .attr("stroke-dasharray", totalLength + " " + totalLength)
+              .attr("stroke-dashoffset", totalLength)
+              .transition()
+              .duration(1200)
+              .ease(d3.easeLinear)
+              .attr("stroke-dashoffset", 0);
+          });
+        }
+
+        donorLayer
+          .selectAll("circle")
+          .data(rollupArray)
+          .join("circle")
+          .attr("class", "donor-circle")
+          .attr("cx", (d) => projection([d.donor_lon, d.donor_lat])[0])
+          .attr("cy", (d) => projection([d.donor_lon, d.donor_lat])[1])
+          .attr("r", (d) => radiusScale(d.amount))
+          .attr("filter", "url(#glow)")
+          .on("mouseover", function (event, d) {
+            d3.select(this)
+              .raise()
+              .transition()
+              .duration(120)
+              .attr("r", radiusScale(d.amount) + 3)
+              .attr("fill-opacity", 1)
+              .attr("stroke-width", 1.8);
+
+            tooltip
+              .style("visibility", "visible")
+              .style("top", event.pageY + 12 + "px")
+              .style("left", event.pageX + 12 + "px")
+              .html(`
+                <div class="donor-name">${d.donor}</div>
+                <div>Total Donation Amount:</div>
+                <div><strong>$${d.amount.toLocaleString()}</strong></div>
+                <div style="margin-top:4px;">Recipients: ${d.recipients.length}</div>
+              `);
+
+            const validRecipients = d.recipients.filter(
+              (r) =>
+                !isNaN(r.lon) &&
+                !isNaN(r.lat) &&
+                projection([r.lon, r.lat])
+            );
+
+            const flows = lineLayer
+              .selectAll("path")
+              .data(validRecipients, (r) => `${d.donor}-${r.country}-${r.lon}-${r.lat}`)
+              .join("path")
+              .attr("class", "flow-line")
+              .attr("d", (r) => flowPath(d, r));
+
+            animateFlows(flows);
+
+            recipientLayer
+              .selectAll("circle")
+              .data(validRecipients, (r) => `${r.country}-${r.lon}-${r.lat}`)
+              .join("circle")
+              .attr("class", "recipient-dot")
+              .attr("cx", (r) => projection([r.lon, r.lat])[0])
+              .attr("cy", (r) => projection([r.lon, r.lat])[1])
+              .attr("r", 0)
+              .transition()
+              .duration(250)
+              .attr("r", 2.8);
+          })
+          .on("mousemove", (event) => {
+            tooltip
+              .style("top", event.pageY + 12 + "px")
+              .style("left", event.pageX + 12 + "px");
+          })
+          .on("mouseout", function (event, d) {
+            d3.select(this)
+              .transition()
+              .duration(120)
+              .attr("r", radiusScale(d.amount))
+              .attr("fill-opacity", 0.72)
+              .attr("stroke-width", 1);
+
+            tooltip.style("visibility", "hidden");
+            lineLayer.selectAll("path").remove();
+            recipientLayer.selectAll("circle").remove();
+          });
+
+        // Legend
+        const legend = svg.append("g").attr("class", "legend").attr("transform", "translate(730, 430)");
+
+        legend
+          .append("rect")
+          .attr("x", -18)
+          .attr("y", -26)
+          .attr("width", 225)
+          .attr("height", 135)
+          .attr("rx", 10)
+          .attr("fill", "white")
+          .attr("opacity", 0.92)
+          .attr("stroke", "#cbd5e1");
+
+        legend
+          .append("text")
+          .attr("x", 0)
+          .attr("y", 0)
+          .attr("font-size", 14)
+          .attr("font-weight", 700)
+          .text("Legend");
+
+        const legendValues = [
+          d3.min(rollupArray, (d) => d.amount),
+          d3.median(rollupArray, (d) => d.amount),
+          d3.max(rollupArray, (d) => d.amount),
+        ];
+
+        const legendY = [28, 62, 100];
+
+        legendValues.forEach((val, i) => {
+          legend
+            .append("circle")
+            .attr("cx", 22)
+            .attr("cy", legendY[i])
+            .attr("r", radiusScale(val))
+            .attr("fill", "#2563eb")
+            .attr("fill-opacity", 0.72)
+            .attr("stroke", "#0f172a");
+
+          legend
+            .append("text")
+            .attr("x", 56)
+            .attr("y", legendY[i] + 4)
+            .attr("font-size", 12)
+            .text(`$${Math.round(val).toLocaleString()}`);
+        });
+
+        legend
+          .append("line")
+          .attr("x1", 8)
+          .attr("y1", 118)
+          .attr("x2", 42)
+          .attr("y2", 118)
+          .attr("stroke", "#2563eb")
+          .attr("stroke-opacity", 0.35)
+          .attr("stroke-width", 2);
+
+        legend
+          .append("text")
+          .attr("x", 56)
+          .attr("y", 122)
+          .attr("font-size", 12)
+          .text("Aid flow to recipient");
+
+        const zoom = d3
+          .zoom()
+          .scaleExtent([1, 8])
+          .on("zoom", (event) => {
+            g.attr("transform", event.transform);
+          });
+
+        svg.call(zoom);
+      }
+
+      fetchData();
+    </script>
+  </body>
+</html>
