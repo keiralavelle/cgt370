@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI in the Workforce Dashboard</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #eff6ff;
+      color: #111827;
+    }
+
+    .page-title {
+      text-align: center;
+      font-size: 32px;
+      font-weight: 700;
+      margin: 24px 0 8px;
+    }
+
+    .page-subtitle {
+      text-align: center;
+      font-size: 14px;
+      color: #4b5563;
+      margin-bottom: 20px;
+    }
+
+    .filters {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin: 0 24px 20px;
+      padding: 16px;
+      background: #f8fafc;
+      border-radius: 14px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+    }
+
+    .filter-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .filter-group label {
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .filter-group select {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #cbd5e1;
+      min-width: 180px;
+      background: white;
+    }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      padding: 0 24px 24px;
+    }
+
+    .chart-card {
+      background: #f8fafc;
+      border-radius: 14px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+      padding: 12px 12px 8px;
+    }
+
+    svg {
+      display: block;
+    }
+
+    .chart-title {
+      font-size: 16px;
+      font-weight: 700;
+      fill: #111827;
+    }
+
+    .axis path,
+    .axis line {
+      stroke: #374151;
+    }
+
+    .axis text {
+      fill: #111827;
+      font-size: 11px;
+    }
+
+    .grid line {
+      stroke: #d1d5db;
+      stroke-opacity: 0.7;
+      shape-rendering: crispEdges;
+    }
+
+    .grid path {
+      stroke-width: 0;
+    }
+
+    #tooltip {
+      visibility: hidden;
+      position: absolute;
+      background: rgba(29, 78, 216, 0.95);
+      color: white;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font: 12px/1.4 Arial, sans-serif;
+      pointer-events: none;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      max-width: 220px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page-title">AI in the Workforce Dashboard</div>
+  <div class="page-subtitle">
+    Adoption of AI by time, industries, and seniority levels
+  </div>
+
+  <!-- filter by industry -->
+  <div class="filters">
+    <div class="filter-group">
+      <label for="industryFilter">Industry</label>
+      <select id="industryFilter">
+        <option value="All">All</option>
+      </select>
+    </div>
+
+    <!-- filter by country -->
+    <div class="filter-group">
+      <label for="countryFilter">Country</label>
+      <select id="countryFilter">
+        <option value="All">All</option>
+      </select>
+    </div>
+
+    <!-- filter by seniority -->
+    <div class="filter-group">
+      <label for="seniorityFilter">Seniority Level</label>
+      <select id="seniorityFilter">
+        <option value="All">All</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="tooltip"></div>
+
+  <!-- dashboard -->
+  <div class="dashboard">
+    <div class="chart-card" id="line-chart"></div>
+    <div class="chart-card" id="bar-chart"></div>
+    <div class="chart-card" id="seniority-chart"></div>
+  </div>
+
+  <script>
+    const tooltip = d3.select("#tooltip");
+    let fullData = [];
+
+    //getting data
+    d3.csv("ai_impact_jobs_2010_2025.csv").then(data => {
+      data.forEach(d => {
+        d.posting_year = +d.posting_year;
+        d.salary_usd = +d.salary_usd;
+        d.ai_intensity_score = +d.ai_intensity_score;
+        d.automation_risk_score = +d.automation_risk_score;
+
+        const aiVal = String(d.ai_mentioned).trim().toLowerCase();
+        d.ai_mentioned = aiVal === "true" || aiVal === "1" || aiVal === "yes";
+
+        d.industry = d.industry ? d.industry.trim() : "Unknown";
+        d.country = d.country ? d.country.trim() : "Unknown";
+        d.seniority_level = d.seniority_level ? d.seniority_level.trim() : "Unknown";
+      });
+
+      fullData = data;
+
+      populateFilters(data);
+      updateDashboard();
+    });
+
+    function populateFilters(data) {
+      populateSelect("#industryFilter", data.map(d => d.industry));
+      populateSelect("#countryFilter", data.map(d => d.country));
+      populateSelect("#seniorityFilter", data.map(d => d.seniority_level));
+
+      d3.select("#industryFilter").on("change", updateDashboard);
+      d3.select("#countryFilter").on("change", updateDashboard);
+      d3.select("#seniorityFilter").on("change", updateDashboard);
+    }
+
+    function populateSelect(selector, values) {
+      const select = d3.select(selector);
+      const uniqueValues = [...new Set(values)]
+        .filter(d => d && d !== "Unknown")
+        .sort(d3.ascending);
+
+      select.selectAll("option.data-option")
+        .data(uniqueValues)
+        .enter()
+        .append("option")
+        .attr("class", "data-option")
+        .attr("value", d => d)
+        .text(d => d);
+    }
+
+    //how to filter data based on selected filters
+    function getFilteredData() {
+      const selectedIndustry = d3.select("#industryFilter").property("value");
+      const selectedCountry = d3.select("#countryFilter").property("value");
+      const selectedSeniority = d3.select("#seniorityFilter").property("value");
+
+      return fullData.filter(d => {
+        const industryMatch = selectedIndustry === "All" || d.industry === selectedIndustry;
+        const countryMatch = selectedCountry === "All" || d.country === selectedCountry;
+        const seniorityMatch = selectedSeniority === "All" || d.seniority_level === selectedSeniority;
+        return industryMatch && countryMatch && seniorityMatch;
+      });
+    }
+
+    //update dashboard based on filters
+    function updateDashboard() {
+      const filteredData = getFilteredData();
+
+      d3.select("#line-chart").selectAll("*").remove();
+      d3.select("#bar-chart").selectAll("*").remove();
+      d3.select("#seniority-chart").selectAll("*").remove();
+
+      drawLineChart(filteredData);
+      drawIndustryChart(filteredData);
+      drawSeniorityChart(filteredData);
+    }
+
+    // line chart to show AI adoption over time
+    function drawLineChart(data) {
+      const width = 620;
+      const height = 360;
+      const margin = { top: 42, right: 20, bottom: 45, left: 55 };
+
+      const svg = d3.select("#line-chart")
+        .append("svg")
+        .attr("width", width)
+        .attr("height", height);
+
+      svg.append("text")
+        .attr("class", "chart-title")
+        .attr("x", margin.left)
+        .attr("y", 24)
+        .text("AI Adoption Over Time");
+
+      const grouped = d3.rollups(
+        data.filter(d => !isNaN(d.posting_year)),
+        v => ({
+          total: v.length,
+          aiCount: d3.sum(v, d => d.ai_mentioned ? 1 : 0)
+        }),
+        d => d.posting_year
+      )
+      .map(([year, values]) => ({
+        year,
+        rate: values.total === 0 ? 0 : (values.aiCount / values.total) * 100,
+        total: values.total,
+        aiCount: values.aiCount
+      }))
+      .sort((a, b) => a.year - b.year);
+
+      if (grouped.length === 0) {
+        svg.append("text")
+          .attr("x", width / 2)
+          .attr("y", height / 2)
+          .attr("text-anchor", "middle")
+          .text("No data for current filters");
+        return;
+      }
+
+      //scales and axes
+      const x = d3.scaleLinear()
+        .domain(d3.extent(grouped, d => d.year))
+        .range([margin.left, width - margin.right]);
+
+      const y = d3.scaleLinear()
+        .domain([0, Math.max(100, d3.max(grouped, d => d.rate) || 0)])
+        .nice()
+        .range([height - margin.bottom, margin.top]);
+
+      svg.append("g")
+        .attr("class", "grid")
+        .attr("transform", `translate(${margin.left},0)`)
+        .call(
+          d3.axisLeft(y)
+            .tickSize(-(width - margin.left - margin.right))
+            .tickFormat("")
+        );
+
+      svg.append("g")
+        .attr("class", "axis")
+        .attr("transform", `translate(0,${height - margin.bottom})`)
+        .call(d3.axisBottom(x).tickFormat(d3.format("d")));
+
+      svg.append("g")
+        .attr("class", "axis")
+        .attr("transform", `translate(${margin.left},0)`)
+        .call(d3.axisLeft(y));
+
+      const line = d3.line()
+        .x(d => x(d.year))
+        .y(d => y(d.rate));
+
+      svg.append("path")
+        .datum(grouped)
+        .attr("stroke", "#1d4ed8")
+        .attr("fill", "none")
+        .attr("stroke-width", 2.5)
+        .attr("d", line);
+
+      svg.selectAll(".line-dot")
+        .data(grouped)
+        .enter()
+        .append("circle")
+        .attr("cx", d => x(d.year))
+        .attr("cy", d => y(d.rate))
+        .attr("r", 4.5)
+        .attr("fill", "#2563eb")
+        .on("mouseover", (event, d) => {
+          tooltip.style("visibility", "visible").html(`
+            <strong>Year:</strong> ${d.year}<br>
+            <strong>AI mention rate:</strong> ${d.rate.toFixed(1)}%<br>
+            <strong>AI jobs:</strong> ${d.aiCount}<br>
+            <strong>Total jobs:</strong> ${d.total}
+          `);
+        })
+        .on("mousemove", event => {
+          tooltip.style("top", (event.pageY + 12) + "px")
+                 .style("left", (event.pageX + 12) + "px");
+        })
+        .on("mouseout", () => tooltip.style("visibility", "hidden"));
+
+      svg.append("text")
+        .attr("x", width / 2)
+        .attr("y", height - 8)
+        .attr("text-anchor", "middle")
+        .attr("font-size", 12)
+        .text("Posting Year");
+
+      svg.append("text")
+        .attr("transform", "rotate(-90)")
+        .attr("x", -height / 2)
+        .attr("y", 16)
+        .attr("text-anchor", "middle")
+        .attr("font-size", 12)
+        .text("AI Mention Rate (%)");
+    }
+
+    function drawIndustryChart(data) {
+      const width = 620;
+      const height = 360;
+      const margin = { top: 42, right: 20, bottom: 45, left: 160 };
+
+      const svg = d3.select("#bar-chart")
+        .append("svg")
+        .attr("width", width)
+        .attr("height", height);
+
+      svg.append("text")
+        .attr("class", "chart-title")
+        .attr("x", margin.left)
+        .attr("y", 24)
+        .text("Industries by % of Jobs Mentioning AI");
+
+      const grouped = d3.rollups(
+        data.filter(d => d.industry),
+        v => ({
+          total: v.length,
+          aiCount: d3.sum(v, d => d.ai_mentioned ? 1 : 0)
+        }),
+        d => d.industry
+      )
+      .map(([industry, values]) => ({
+        industry,
+        aiRate: values.total === 0 ? 0 : (values.aiCount / values.total) * 100,
+        total: values.total,
+        aiCount: values.aiCount
+      }))
+      .sort((a, b) => b.aiRate - a.aiRate)
+      .slice(0, 10);
+
+      if (grouped.length === 0) {
+        svg.append("text")
+          .attr("x", width / 2)
+          .attr("y", height / 2)
+          .attr("text-anchor", "middle")
+          .text("No data for current filters");
+        return;
+      }
+
+      const x = d3.scaleLinear()
+        .domain([0, d3.max(grouped, d => d.aiRate)])
+        .nice()
+        .range([margin.left, width - margin.right]);
+
+      const y = d3.scaleBand()
+        .domain(grouped.map(d => d.industry))
+        .range([margin.top, height - margin.bottom])
+        .padding(0.25);
+
+      svg.append("g")
+        .attr("class", "grid")
+        .attr("transform", `translate(0,${height - margin.bottom})`)
+        .call(
+          d3.axisBottom(x)
+            .tickSize(-(height - margin.top - margin.bottom))
+            .tickFormat("")
+        );
+
+      svg.append("g")
+        .attr("class", "axis")
+        .attr("transform", `translate(0,${height - margin.bottom})`)
+        .call(d3.axisBottom(x));
+
+      svg.append("g")
+        .attr("class", "axis")
+        .attr("transform", `translate(${margin.left},0)`)
+        .call(d3.axisLeft(y));
+
+      svg.selectAll(".industry-bar")
+        .data(grouped)
+        .enter()
+        .append("rect")
+        .attr("x", margin.left)
+        .attr("y", d => y(d.industry))
+        .attr("width", d => x(d.aiRate) - margin.left)
+        .attr("height", y.bandwidth())
+        .attr("fill", "#93c5fd")
+        .on("mouseover", (event, d) => {
+          tooltip.style("visibility", "visible").html(`
+            <strong>${d.industry}</strong><br>
+            <strong>AI mention rate:</strong> ${d.aiRate.toFixed(1)}%<br>
+            <strong>AI jobs:</strong> ${d.aiCount}<br>
+            <strong>Total jobs:</strong> ${d.total}
+          `);
+        })
+        //tooltip follows mouse
+        .on("mousemove", event => {
+          tooltip.style("top", (event.pageY + 12) + "px")
+                 .style("left", (event.pageX + 12) + "px");
+        })
+        .on("mouseout", () => tooltip.style("visibility", "hidden"));
+
+      svg.append("text")
+        .attr("x", width / 2)
+        .attr("y", height - 8)
+        .attr("text-anchor", "middle")
+        .attr("font-size", 12)
+        .text("AI Mention Rate (%)");
+    }
+
+    //bar chart to show AI adoption by seniority level
+    function drawSeniorityChart(data) {
+      const width = 620;
+      const height = 360;
+      const margin = { top: 42, right: 20, bottom: 70, left: 55 };
+
+      const svg = d3.select("#seniority-chart")
+        .append("svg")
+        .attr("width", width)
+        .attr("height", height);
+
+      svg.append("text")
+        .attr("class", "chart-title")
+        .attr("x", margin.left)
+        .attr("y", 24)
+        .text("AI Adoption by Seniority Level");
+
+      const desiredOrder = [
+        "Entry",
+        "Junior",
+        "Mid",
+        "Senior",
+        "Lead",
+        "Manager",
+        "Director",
+        "Executive"
+      ];
+
+      const grouped = d3.rollups(
+        data.filter(d => d.seniority_level),
+        v => ({
+          total: v.length,
+          aiCount: d3.sum(v, d => d.ai_mentioned ? 1 : 0)
+        }),
+        d => d.seniority_level
+      )
+      .map(([level, values]) => ({
+        level,
+        aiRate: values.total === 0 ? 0 : (values.aiCount / values.total) * 100,
+        total: values.total,
+        aiCount: values.aiCount
+      }))
+      .sort((a, b) => {
+        const aIndex = desiredOrder.indexOf(a.level);
+        const bIndex = desiredOrder.indexOf(b.level);
+        if (aIndex === -1 && bIndex === -1) return d3.ascending(a.level, b.level);
+        if (aIndex === -1) return 1;
+        if (bIndex === -1) return -1;
+        return aIndex - bIndex;
+      });
+
+      if (grouped.length === 0) {
+        svg.append("text")
+          .attr("x", width / 2)
+          .attr("y", height / 2)
+          .attr("text-anchor", "middle")
+          .text("No data for current filters");
+        return;
+      }
+
+      const x = d3.scaleBand()
+        .domain(grouped.map(d => d.level))
+        .range([margin.left, width - margin.right])
+        .padding(0.3);
+
+      const y = d3.scaleLinear()
+        .domain([0, d3.max(grouped, d => d.aiRate)])
+        .nice()
+        .range([height - margin.bottom, margin.top]);
+
+      svg.append("g")
+        .attr("class", "grid")
+        .attr("transform", `translate(${margin.left},0)`)
+        .call(
+          d3.axisLeft(y)
+            .tickSize(-(width - margin.left - margin.right))
+            .tickFormat("")
+        );
+
+      svg.append("g")
+        .attr("class", "axis")
+        .attr("transform", `translate(0,${height - margin.bottom})`)
+        .call(d3.axisBottom(x))
+        .selectAll("text")
+        .attr("transform", "rotate(-25)")
+        .style("text-anchor", "end");
+
+      svg.append("g")
+        .attr("class", "axis")
+        .attr("transform", `translate(${margin.left},0)`)
+        .call(d3.axisLeft(y));
+
+      svg.selectAll(".seniority-bar")
+        .data(grouped)
+        .enter()
+        .append("rect")
+        .attr("x", d => x(d.level))
+        .attr("y", d => y(d.aiRate))
+        .attr("width", x.bandwidth())
+        .attr("height", d => height - margin.bottom - y(d.aiRate))
+        .attr("fill", "#3b82f6")
+        .on("mouseover", (event, d) => {
+          tooltip.style("visibility", "visible").html(`
+            <strong>${d.level}</strong><br>
+            <strong>AI mention rate:</strong> ${d.aiRate.toFixed(1)}%<br>
+            <strong>AI jobs:</strong> ${d.aiCount}<br>
+            <strong>Total jobs:</strong> ${d.total}
+          `);
+        })
+        .on("mousemove", event => {
+          tooltip.style("top", (event.pageY + 12) + "px")
+                 .style("left", (event.pageX + 12) + "px");
+        })
+        .on("mouseout", () => tooltip.style("visibility", "hidden"));
+
+      svg.append("text")
+        .attr("x", width / 2)
+        .attr("y", height - 8)
+        .attr("text-anchor", "middle")
+        .attr("font-size", 12)
+        .text("Seniority Level");
+
+      svg.append("text")
+        .attr("transform", "rotate(-90)")
+        .attr("x", -height / 2)
+        .attr("y", 16)
+        .attr("text-anchor", "middle")
+        .attr("font-size", 12)
+        .text("AI Mention Rate (%)");
+    }
+  </script>
+</body>
+</html>
