@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Spotify Treemap</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      font-family: Inter, Arial, sans-serif;
+      background: #0b1020;
+      color: white;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    h1 {
+      margin-bottom: 6px;
+      font-size: 32px;
+    }
+
+    .subtitle {
+      color: #cbd5e1;
+      margin-bottom: 14px;
+    }
+
+    .status {
+      margin-bottom: 12px;
+      color: #94a3b8;
+      font-size: 14px;
+    }
+
+    .stats {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .chip {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 13px;
+      color: #cbd5e1;
+    }
+
+    svg {
+      width: 100%;
+      height: 800px;
+      background: #0f172a;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
+    }
+
+    .node rect {
+      stroke: rgba(255,255,255,0.15);
+      transition: filter 0.15s;
+    }
+
+    .node:hover rect {
+      filter: brightness(1.1);
+    }
+
+    .node text {
+      pointer-events: none;
+      fill: white;
+      font-size: 11px;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    }
+
+    .label-title {
+      font-weight: bold;
+    }
+
+    .label-meta {
+      fill: rgba(255,255,255,0.8);
+      font-size: 10px;
+    }
+
+    .tooltip {
+      position: fixed;
+      opacity: 0;
+      pointer-events: none;
+      background: rgba(0,0,0,0.9);
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.4;
+      max-width: 260px;
+    }
+  </style>
+</head>
+
+<body>
+<div class="container">
+  <h1>Playlist → Artist → Track</h1>
+  <div class="subtitle">Size = popularity • Hover for details</div>
+  <div class="status" id="status">Loading...</div>
+  <div class="stats" id="stats"></div>
+  <svg id="chart"></svg>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+const CSV_PATH = "featured_Spotify_track_info.csv";
+const width = 1300;
+const height = 800;
+
+const svg = d3.select("#chart").attr("viewBox", `0 0 ${width} ${height}`);
+const tooltip = d3.select("#tooltip");
+const statusBox = document.getElementById("status");
+const statsBox = document.getElementById("stats");
+
+function parseNumber(v){ return isNaN(+v) ? 0 : +v; }
+
+function splitMulti(v){
+  if (!v) return [];
+  return v.split(",").map(s => s.trim()).filter(Boolean);
+}
+
+function normalize(d){
+  return {
+    track: d.names,
+    popularity: parseNumber(d.popularity),
+    playlists: d.playlists_found,
+    artists: d.artists,
+    release: d.release_date,
+    energy: parseNumber(d.energy),
+    valence: parseNumber(d.valence),
+    duration: parseNumber(d.duration_ms)
+  };
+}
+
+function buildHierarchy(rows){
+  const root = { name: "All", children: [] };
+  const pMap = new Map();
+
+  rows.forEach(d => {
+    const playlists = splitMulti(d.playlists);
+    const artists = splitMulti(d.artists);
+
+    playlists.forEach(p => {
+      if (!pMap.has(p)){
+        pMap.set(p, { name: p, children: [], aMap: new Map() });
+        root.children.push(pMap.get(p));
+      }
+
+      const pNode = pMap.get(p);
+
+      artists.forEach(a => {
+        if (!pNode.aMap.has(a)){
+          const aNode = { name: a, children: [] };
+          pNode.aMap.set(a, aNode);
+          pNode.children.push(aNode);
+        }
+
+        pNode.aMap.get(a).children.push({
+          name: d.track,
+          value: d.popularity || 1,
+          details: d
+        });
+      });
+    });
+  });
+
+  root.children.forEach(d => delete d.aMap);
+  return root;
+}
+
+function render(data){
+  svg.selectAll("*").remove();
+
+  const root = d3.hierarchy(data)
+    .sum(d => d.value || 0)
+    .sort((a,b) => b.value - a.value);
+
+  d3.treemap()
+    .size([width, height])
+    .paddingTop(d => d.depth === 1 ? 20 : 0)
+    .paddingInner(2)
+    (root);
+
+  const color = d3.scaleLinear()
+    .domain(d3.extent(root.leaves(), d => d.value))
+    .range(["#3b82f6", "#ef4444"]);
+
+  const playlistColor = d3.scaleOrdinal(d3.schemeTableau10);
+
+  const nodes = svg.selectAll("g")
+    .data(root.descendants().filter(d => d.depth > 0))
+    .join("g")
+    .attr("class","node")
+    .attr("transform", d => `translate(${d.x0},${d.y0})`);
+
+  nodes.append("rect")
+    .attr("width", d => d.x1 - d.x0)
+    .attr("height", d => d.y1 - d.y0)
+    .attr("fill", d => {
+      if (d.depth === 1) return playlistColor(d.data.name);
+      if (d.depth === 2) return d3.color(playlistColor(d.parent.data.name)).brighter(0.5);
+      return color(d.value);
+    })
+    .on("mousemove",(e,d)=>{
+      let html="";
+      if (d.depth===3){
+        const x=d.data.details;
+        html=`<b>${x.track}</b><br>
+        Artist: ${d.parent.data.name}<br>
+        Playlist: ${d.parent.parent.data.name}<br>
+        Popularity: ${x.popularity}<br>
+        Energy: ${x.energy}<br>
+        Valence: ${x.valence}`;
+      }
+      tooltip.style("opacity",1)
+        .html(html)
+        .style("left",e.clientX+12+"px")
+        .style("top",e.clientY+12+"px");
+    })
+    .on("mouseleave",()=>tooltip.style("opacity",0));
+
+  nodes.each(function(d){
+    const w=d.x1-d.x0;
+    const h=d.y1-d.y0;
+    if (w<70 || h<22) return;
+
+    const g=d3.select(this);
+
+    g.append("text")
+      .attr("x",4)
+      .attr("y",14)
+      .attr("class","label-title")
+      .text(d.data.name.length>20?d.data.name.slice(0,18)+"…":d.data.name);
+
+    if (d.depth===3 && h>36){
+      g.append("text")
+        .attr("x",4)
+        .attr("y",28)
+        .attr("class","label-meta")
+        .text("pop "+Math.round(d.value));
+    }
+  });
+
+  statusBox.textContent =
+    `${root.leaves().length} tracks • ${root.children.length} playlists`;
+}
+
+d3.csv(CSV_PATH, normalize).then(data=>{
+  const usable = data.filter(d => d.track && d.playlists && d.artists);
+
+  if (!usable.length){
+    statusBox.textContent="No usable data";
+    return;
+  }
+
+  const hierarchy = buildHierarchy(usable);
+
+  const avg = d3.mean(usable,d=>d.popularity);
+  statsBox.innerHTML = `
+    <div class="chip">${usable.length} rows</div>
+    <div class="chip">avg popularity ${avg.toFixed(1)}</div>
+  `;
+
+  render(hierarchy);
+}).catch(err=>{
+  console.error(err);
+  statusBox.textContent="Failed to load CSV";
+});
+</script>
+</body>
+</html>
