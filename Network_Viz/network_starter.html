@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CGT370 Lab 18</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: linear-gradient(to bottom, #f7f9fc, #eef3f8);
+      color: #222;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    h1 {
+      margin-bottom: 8px;
+      color: #1f3b57;
+    }
+
+    .note {
+      max-width: 900px;
+      font-size: 15px;
+      color: #4b5d70;
+      margin-bottom: 18px;
+    }
+
+    .controls {
+      margin: 14px 0 18px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    button {
+      padding: 10px 14px;
+      border: none;
+      background: #1f6feb;
+      color: white;
+      cursor: pointer;
+      border-radius: 8px;
+      font-size: 14px;
+      transition: 0.2s ease;
+    }
+
+    button:hover {
+      background: #1557b0;
+      transform: translateY(-1px);
+    }
+
+    .card {
+      background: white;
+      border-radius: 14px;
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);
+      padding: 18px;
+    }
+
+    svg {
+      width: 100%;
+      height: 580px;
+      border-radius: 12px;
+      background: #fbfdff;
+      display: block;
+    }
+
+    .link {
+      stroke-opacity: 0.7;
+    }
+
+    .node {
+      stroke: white;
+      stroke-width: 2px;
+      cursor: grab;
+    }
+
+    .label {
+      font-size: 12px;
+      font-weight: bold;
+      fill: #22313f;
+      pointer-events: none;
+    }
+
+    .legend {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      margin: 10px 0 14px;
+      font-size: 14px;
+      color: #34495e;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .legend-color {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .tooltip {
+      position: absolute;
+      background: rgba(34, 34, 34, 0.95);
+      color: white;
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>CGT370 Lab 18</h1>
+    <p class="note">
+      This force-directed network shows places I’ve traveled to. The colors represent different trips and there is hovering to see more details about each place, like which trip I went to it on. 
+    </p>
+
+    <div class="controls">
+      <button id="drawBtn">Draw Network</button>
+      <button id="resetBtn">Reset</button>
+    </div>
+
+    <div class="legend" id="legend"></div>
+
+    <div class="card">
+      <svg width="980" height="580"></svg>
+    </div>
+  </div>
+
+  <div class="tooltip" id="tooltip"></div>
+
+  <script type="module">
+    import * as d3 from 'https://esm.sh/d3@7';
+
+    const width = 980;
+    const height = 580;
+
+    const nodes = [
+      //trip 1 
+      { id: 'Athens', group: 'Cruise 1', type: 'City' },
+      { id: 'Rome', group: 'Cruise 1', type: 'City' },
+      { id: 'Turkey', group: 'Cruise 1', type: 'Country' },
+
+      //trip 2 
+      { id: 'Switzerland', group: 'Cruise 2', type: 'Country' },
+      { id: 'Germany', group: 'Cruise 2', type: 'Country' },
+      { id: 'Amsterdam', group: 'Cruise 2', type: 'City' },
+      { id: 'Netherlands', group: 'Cruise 2', type: 'Country' },
+
+      //trip 3 
+      { id: 'Lisbon', group: 'Study Abroad', type: 'City' },
+
+      //trip 4 
+      { id: 'Paris', group: 'Trip 4', type: 'City' },
+      { id: 'London', group: 'Trip 4', type: 'City' }
+    ];
+
+    const links = [
+      { source: 'Athens', target: 'Rome', relationship: 'same trip', strength: 3 },
+      { source: 'Rome', target: 'Turkey', relationship: 'same trip', strength: 3 },
+      { source: 'Athens', target: 'Turkey', relationship: 'same trip', strength: 2 },
+
+      { source: 'Switzerland', target: 'Germany', relationship: 'same trip', strength: 3 },
+      { source: 'Germany', target: 'Amsterdam', relationship: 'same trip', strength: 3 },
+      { source: 'Amsterdam', target: 'Netherlands', relationship: 'same trip', strength: 2 },
+      { source: 'Switzerland', target: 'Netherlands', relationship: 'same trip', strength: 1 },
+
+      { source: 'Paris', target: 'London', relationship: 'same trip', strength: 3 }
+    ];
+
+    const svg = d3.select('svg');
+    const chart = svg.append('g');
+    const tooltip = d3.select('#tooltip');
+
+    const color = d3.scaleOrdinal()
+      .domain(['Cruise 1', 'Cruise 2', 'Study Abroad', 'Trip 4'])
+      .range(['#ff8ba7', '#6c9ff8', '#55c59a', '#f6b73c']);
+
+    const linkColor = d3.scaleOrdinal()
+      .domain(['same trip'])
+      .range(['#94a3b8']);
+
+    let simulation;
+
+    function getNodeDegrees(nodeList, linkList) {
+      const degreeMap = {};
+      nodeList.forEach(node => {
+        degreeMap[node.id] = 0;
+      });
+
+      linkList.forEach(link => {
+        degreeMap[link.source] += 1;
+        degreeMap[link.target] += 1;
+      });
+
+      return degreeMap;
+    }
+
+    function drawLegend() {
+      const legend = d3.select('#legend');
+      legend.html('');
+
+      color.domain().forEach(group => {
+        const item = legend.append('div').attr('class', 'legend-item');
+        item.append('span')
+          .attr('class', 'legend-color')
+          .style('background', color(group));
+        item.append('span').text(group);
+      });
+    }
+
+    function drawNetwork() {
+      chart.selectAll('*').remove();
+      if (simulation) simulation.stop();
+
+      const nodeData = nodes.map(d => ({ ...d }));
+      const linkData = links.map(d => ({ ...d }));
+
+      const degrees = getNodeDegrees(nodes, links);
+
+      nodeData.forEach(node => {
+        node.degree = degrees[node.id];
+      });
+
+      const sizeScale = d3.scaleLinear()
+        .domain(d3.extent(nodeData, d => d.degree))
+        .range([12, 22]);
+
+      const link = chart
+        .append('g')
+        .attr('class', 'links')
+        .selectAll('line')
+        .data(linkData)
+        .join('line')
+        .attr('class', 'link')
+        .attr('stroke-width', d => d.strength + 1)
+        .attr('stroke', d => linkColor(d.relationship));
+
+      const node = chart
+        .append('g')
+        .attr('class', 'nodes')
+        .selectAll('circle')
+        .data(nodeData)
+        .join('circle')
+        .attr('class', 'node')
+        .attr('r', d => sizeScale(d.degree))
+        .attr('fill', d => color(d.group))
+        .on('mouseover', (event, d) => {
+          tooltip
+            .style('opacity', 1)
+            .html(`
+              <strong>${d.id}</strong><br>
+              Type: ${d.type}<br>
+              Trip: ${d.group}<br>
+            `);
+        })
+        .on('mousemove', (event) => {
+          tooltip
+            .style('left', (event.pageX + 12) + 'px')
+            .style('top', (event.pageY - 28) + 'px');
+        })
+        .on('mouseout', () => {
+          tooltip.style('opacity', 0);
+        });
+
+      const label = chart
+        .append('g')
+        .attr('class', 'labels')
+        .selectAll('text')
+        .data(nodeData)
+        .join('text')
+        .attr('class', 'label')
+        .attr('text-anchor', 'middle')
+        .text(d => d.id);
+
+      simulation = d3.forceSimulation(nodeData)
+        .force('link', d3.forceLink(linkData).id(d => d.id).distance(120))
+        .force('charge', d3.forceManyBody().strength(-260))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collision', d3.forceCollide().radius(d => sizeScale(d.degree) + 18))
+        .on('tick', ticked);
+
+      function ticked() {
+        link
+          .attr('x1', d => d.source.x)
+          .attr('y1', d => d.source.y)
+          .attr('x2', d => d.target.x)
+          .attr('y2', d => d.target.y);
+
+        node
+          .attr('cx', d => d.x)
+          .attr('cy', d => d.y);
+
+        label
+          .attr('x', d => d.x)
+          .attr('y', d => d.y - (sizeScale(d.degree) + 10));
+      }
+
+      node.call(drag(simulation));
+    }
+
+    function drag(simulation) {
+      function dragstarted(event) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        event.subject.fx = event.subject.x;
+        event.subject.fy = event.subject.y;
+      }
+
+      function dragged(event) {
+        event.subject.fx = event.x;
+        event.subject.fy = event.y;
+      }
+
+      function dragended(event) {
+        if (!event.active) simulation.alphaTarget(0);
+        event.subject.fx = null;
+        event.subject.fy = null;
+      }
+
+      return d3.drag()
+        .on('start', dragstarted)
+        .on('drag', dragged)
+        .on('end', dragended);
+    }
+
+    document.getElementById('drawBtn').addEventListener('click', drawNetwork);
+
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      chart.selectAll('*').remove();
+      if (simulation) simulation.stop();
+      tooltip.style('opacity', 0);
+    });
+
+    drawLegend();
+    drawNetwork();
+  </script>
+</body>
+</html>
