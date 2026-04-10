@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>Which College Majors Lead to Higher Salaries?</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        padding: 0;
+      }
+
+      .section {
+        padding: clamp(2rem, 5vw, 6rem) 1rem;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      .columns {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 30px;
+        justify-content: center;
+        align-items: flex-start;
+      }
+
+      .column {
+        flex: 1 1 320px;
+        min-width: 0;
+      }
+
+      h1 {
+        text-align: center;
+        margin-bottom: 2rem;
+        font-size: clamp(1.75rem, 3vw, 2.5rem);
+        line-height: 1.2;
+      }
+
+      .description p {
+        line-height: 1.6;
+        font-size: 1rem;
+      }
+
+      .chart-area {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        background: #f7f7f7;
+        padding: 1rem;
+        border-radius: 12px;
+        width: 100%;
+      }
+
+      .filter {
+        text-align: center;
+        margin-bottom: 1rem;
+      }
+
+      .filter label {
+        font-weight: bold;
+        display: block;
+        margin-bottom: 0.5rem;
+      }
+
+      .filter select {
+        width: 100%;
+        max-width: 320px;
+        padding: 0.6rem 0.75rem;
+        font-size: 1rem;
+      }
+
+      .chart-wrapper {
+        width: 100%;
+        min-height: 320px;
+      }
+
+      #bar-chart {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      .bar {
+        fill: steelblue;
+      }
+
+      .axis text {
+        fill: #333;
+      }
+
+      .axis path,
+      .axis line {
+        stroke: #999;
+      }
+
+      @media (max-width: 768px) {
+        .columns {
+          gap: 20px;
+        }
+
+        .chart-area {
+          padding: 0.75rem;
+        }
+
+        .description p {
+          font-size: 0.95rem;
+        }
+
+        .chart-wrapper {
+          min-height: 280px;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .section {
+          padding: 1.5rem 0.75rem;
+        }
+
+        h1 {
+          margin-bottom: 1.5rem;
+        }
+
+        .filter select {
+          font-size: 0.95rem;
+        }
+
+        .chart-wrapper {
+          min-height: 260px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="section">
+      <div class="container">
+        <h1>Which College Majors Lead to Higher Salaries?</h1>
+
+        <div class="columns dashboard-container">
+          <div class="column description">
+            <p>
+              This chart explores how different college majors compare in terms
+              of median salaries. Select a major category to see which fields
+              offer higher earning potential. This can be a useful guide for
+              career planning and evaluating return on investment in education.
+            </p>
+            <p>
+              Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do
+              eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut
+              enim ad minim veniam, quis nostrud exercitation ullamco laboris
+              nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in
+              reprehenderit in voluptate velit esse cillum dolore eu fugiat
+              nulla pariatur. Excepteur sint occaecat cupidatat non proident,
+              sunt in culpa qui officia deserunt mollit anim id est laborum.
+            </p>
+          </div>
+
+          <div class="column chart-area">
+            <div class="filter">
+              <label for="category">Select Major Category:</label>
+              <select id="category"></select>
+            </div>
+            <div class="chart-wrapper" id="chart-wrapper">
+              <svg id="bar-chart" role="img" aria-label="Bar chart of median salaries by major"></svg>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      let cachedData = [];
+
+      d3.csv("all-ages.csv")
+        .then((data) => {
+          data.forEach((d) => {
+            d.Median = +d.Median;
+          });
+
+          cachedData = data;
+
+          const categories = [...new Set(data.map((d) => d.Major_category))];
+          drawDropdown(categories);
+
+          if (categories.length > 0) {
+            d3.select("#category").property("value", categories[0]);
+            drawChart(categories[0]);
+          }
+        })
+        .catch((error) => {
+          console.error("Error loading the data:", error);
+        });
+
+      function drawDropdown(categories) {
+        const dropdown = d3.select("#category");
+
+        dropdown
+          .selectAll("option")
+          .data(categories)
+          .join("option")
+          .attr("value", (d) => d)
+          .text((d) => d);
+
+        dropdown.on("change", function () {
+          drawChart(this.value);
+        });
+      }
+
+      function drawChart(selectedCategory) {
+        const wrapper = document.getElementById("chart-wrapper");
+        const svg = d3.select("#bar-chart");
+
+        if (!wrapper || !selectedCategory || !cachedData.length) return;
+
+        const filteredData = cachedData
+          .filter((d) => d.Major_category === selectedCategory)
+          .sort((a, b) => d3.descending(a.Median, b.Median));
+
+        const containerWidth = wrapper.clientWidth || 400;
+        const isSmallScreen = containerWidth < 640;
+
+        const margin = {
+          top: 24,
+          right: isSmallScreen ? 16 : 24,
+          bottom: 42,
+          left: isSmallScreen ? 130 : 220,
+        };
+
+        const rowHeight = isSmallScreen ? 24 : 28;
+        const width = Math.max(containerWidth, 280);
+        const height = Math.max(filteredData.length * rowHeight, 220);
+
+        const svgWidth = width;
+        const svgHeight = height + margin.top + margin.bottom;
+
+        svg
+          .attr("viewBox", `0 0 ${svgWidth} ${svgHeight}`)
+          .attr("preserveAspectRatio", "xMinYMin meet");
+
+        svg.selectAll("*").remove();
+
+        const chartWidth = width - margin.left - margin.right;
+        const chartHeight = height;
+
+        const truncateLabel = (text, maxLength) =>
+          text.length > maxLength ? text.slice(0, maxLength - 1) + "…" : text;
+
+        const labelMaxLength = isSmallScreen ? 18 : 32;
+
+        const y = d3
+          .scaleBand()
+          .domain(filteredData.map((d) => d.Major))
+          .range([0, chartHeight])
+          .padding(0.12);
+
+        const x = d3
+          .scaleLinear()
+          .domain([0, d3.max(filteredData, (d) => d.Median) || 0])
+          .nice()
+          .range([0, chartWidth]);
+
+        const g = svg
+          .append("g")
+          .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        const xTickFormat = (d) => {
+          if (isSmallScreen) {
+            return `$${Math.round(d / 1000)}k`;
+          }
+          return `$${d3.format(",")(d)}`;
+        };
+
+        const xAxis = d3
+          .axisBottom(x)
+          .ticks(isSmallScreen ? 4 : 6)
+          .tickFormat(xTickFormat);
+
+        g.append("g")
+          .attr("class", "axis axis--x")
+          .attr("transform", `translate(0,${chartHeight})`)
+          .call(xAxis)
+          .selectAll("text")
+          .style("font-size", isSmallScreen ? "11px" : "12px");
+
+        g.append("g")
+          .attr("class", "axis axis--y")
+          .call(
+            d3.axisLeft(y).tickFormat((d) => truncateLabel(d, labelMaxLength))
+          )
+          .selectAll("text")
+          .style("font-size", isSmallScreen ? "10px" : "12px");
+
+        g.selectAll(".bar")
+          .data(filteredData)
+          .join("rect")
+          .attr("class", "bar")
+          .attr("x", 0)
+          .attr("y", (d) => y(d.Major))
+          .attr("height", y.bandwidth())
+          .attr("width", 0)
+          .transition()
+          .duration(500)
+          .ease(d3.easeLinear)
+          .attr("width", (d) => x(d.Median));
+      }
+
+      function debounce(func, wait) {
+        let timeout;
+        return function (...args) {
+          clearTimeout(timeout);
+          timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+      }
+
+      const debouncedResize = debounce(() => {
+        const selectedCategory = d3.select("#category").property("value");
+        if (selectedCategory) {
+          drawChart(selectedCategory);
+        }
+      }, 150);
+
+      window.addEventListener("resize", debouncedResize);
+
+      const chartWrapper = document.getElementById("chart-wrapper");
+      if (chartWrapper && "ResizeObserver" in window) {
+        const resizeObserver = new ResizeObserver(() => {
+          const selectedCategory = d3.select("#category").property("value");
+          if (selectedCategory) {
+            debouncedResize();
+          }
+        });
+        resizeObserver.observe(chartWrapper);
+      }
+    </script>
+  </body>
+</html>
